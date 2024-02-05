@@ -727,11 +727,11 @@ RPCHelpMan listunspent()
             continue;
 
         // Elements
-        CAmount amount = out.tx->GetOutputValueOut(*pwallet, out.i);
-        CAsset assetid = out.tx->GetOutputAsset(*pwallet, out.i);
+        CAmount amount = out.value;
+        CAsset assetid = out.asset;
         // Only list known outputs that match optional filter
         if (g_con_elementsmode && (amount < 0 || assetid.IsNull())) {
-            pwallet->WalletLogPrintf("Unable to unblind output: %s:%d\n", out.tx->tx->GetHash().GetHex(), out.i);
+            pwallet->WalletLogPrintf("Unable to unblind output: %s:%d\n", out.outpoint.hash.ToString(), out.outpoint.n);
             continue;
         }
         if (!asset_str.empty() && asset_filter != assetid) {
@@ -795,11 +795,11 @@ RPCHelpMan listunspent()
             if (tx_out.nValue.IsCommitment()) {
                 entry.pushKV("amountcommitment", HexStr(tx_out.nValue.vchCommitment));
             }
-            entry.pushKV("amountblinder", out.tx->GetOutputAmountBlindingFactor(*pwallet, out.i).ToString());
-            entry.pushKV("assetblinder", out.tx->GetOutputAssetBlindingFactor(*pwallet, out.i).ToString());
+            entry.pushKV("amountblinder", out.bf_value.ToString());
+            entry.pushKV("assetblinder", out.bf_asset.ToString());
         }
         entry.pushKV("confirmations", out.depth);
-        if (!out.nDepth) {
+        if (!out.depth) {
             size_t ancestor_count, descendant_count, ancestor_size;
             CAmount ancestor_fees;
             pwallet->chain().getTransactionAncestry(out.outpoint.hash, ancestor_count, descendant_count, &ancestor_size, &ancestor_fees);

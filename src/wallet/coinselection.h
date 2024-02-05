@@ -36,9 +36,6 @@ public:
 
     /** The output itself */
     CTxOut txout;
-    CAmount effective_value;
-    CAmount m_fee{0};
-    CAmount m_long_term_fee{0};
     // ELEMENTS:
     CAmount value;
     CAsset asset;

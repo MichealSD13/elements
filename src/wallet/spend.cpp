@@ -313,11 +313,11 @@ CAmountMap GetAvailableBalance(const CWallet& wallet, const CCoinControl* coinCo
     AvailableCoins(wallet, vCoins, coinControl);
     for (const COutput& out : vCoins) {
         if (out.spendable) {
-            CAmount amt = out.tx->GetOutputValueOut(wallet, out.i);
+            CAmount amt = out.value;
             if (amt < 0) {
                 continue;
             }
-            balance[out.tx->GetOutputAsset(wallet, out.i)] += amt;
+            balance[out.asset] += amt;
         }
     }
     return balance;
@@ -477,7 +477,6 @@ std::optional<SelectionResult> AttemptSelection(const CWallet& wallet, const CAm
                                const CoinSelectionParams& coin_selection_params)
 {
     // Vector of results. We will choose the best one based on waste.
-    // std::vector<std::tuple<CAmount, std::set<CInputCoin>, CAmountMap>> results;
     std::vector<SelectionResult> results;
 
     // ELEMENTS: BnB only for policy asset?
@@ -492,7 +491,7 @@ std::optional<SelectionResult> AttemptSelection(const CWallet& wallet, const CAm
         std::vector<OutputGroup> asset_groups;
         for (OutputGroup g : positive_groups) {
             bool add = true;
-            for (CInputCoin c : g.m_outputs) {
+            for (COutput c : g.m_outputs) {
                 if (c.asset != asset) {
                     add = false;
                     break;
@@ -558,7 +557,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
         {
             if (!out.spendable) continue;
 
-            CAmount amt = out.tx->GetOutputValueOut(wallet, out.i);
+            CAmount amt = out.value;
             if (amt < 0) {
                 continue;
             }
@@ -582,7 +581,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
         int input_bytes = -1;
         CTxOut txout;
         std::map<uint256, CWalletTx>::const_iterator it = wallet.mapWallet.find(outpoint.hash);
-        CInputCoin coin(outpoint, txout, 0); // dummy initialization
+        COutput coin(outpoint, txout, outpoint.n, 0, true, true, true, 0, false); // dummy initialization
         if (it != wallet.mapWallet.end()) {
             const CWalletTx& wtx = it->second;
             // Clearly invalid input, fail
@@ -595,7 +594,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
             }
             input_bytes = GetTxSpendSize(wallet, wtx, outpoint.n, false);
             txout = wtx.tx->vout.at(outpoint.n);
-            coin = CInputCoin(wallet, &wtx, outpoint.n, input_bytes);
+            coin = COutput(outpoint, txout, outpoint.n, input_bytes, true, true, true, 0, false);
         } else {
             // The input is external. We did not find the tx in mapWallet.
             if (!coin_control.GetExternalOutput(outpoint, txout)) {
@@ -614,12 +613,12 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
             if (!txout.nValue.IsExplicit() || !txout.nAsset.IsExplicit()) {
                 return std::nullopt; // We can't get its value, so abort
             }
-            coin = CInputCoin(outpoint, txout, input_bytes);
+            coin = COutput(outpoint, txout, outpoint.n, input_bytes, true, true, true, 0, false);
         }
         // If available, override calculated size with coin control specified size
         if (coin_control.HasInputWeight(outpoint)) {
             input_bytes = GetVirtualTransactionSize(coin_control.GetInputWeight(outpoint), 0, 0);
-            coin = CInputCoin(outpoint, txout, input_bytes);
+            coin = COutput(outpoint, txout, outpoint.n, input_bytes, true, true, true, 0, false);
         }
 
         if (input_bytes == -1) {
@@ -628,9 +627,9 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
 
         /* Set some defaults for depth, spendable, solvable, safe, time, and from_me as these don't matter for preset inputs since no selection is being done. */
         COutput output(outpoint, txout, /*depth=*/ 0, input_bytes, /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ true, /*time=*/ 0, /*from_me=*/ false);
-        output.effective_value = output.txout.nValue - coin_selection_params.m_effective_feerate.GetFee(output.input_bytes);
+        output.effective_value = output.value - coin_selection_params.m_effective_feerate.GetFee(output.input_bytes);
         if (coin_selection_params.m_subtract_fee_outputs) {
-            value_to_select[coin.asset] -= output.txout.nValue;
+            value_to_select[coin.asset] -= output.value;
         } else {
             value_to_select[coin.asset] -= output.effective_value;
         }
@@ -849,11 +848,11 @@ static void resetBlindDetails(BlindDetails* det, bool preserve_output_data = fal
     }
 }
 
-static bool fillBlindDetails(BlindDetails* det, CWallet* wallet, CMutableTransaction& txNew, std::vector<CInputCoin>& selected_coins, bilingual_str& error) {
+static bool fillBlindDetails(BlindDetails* det, CWallet* wallet, CMutableTransaction& txNew, std::vector<COutput>& selected_coins, bilingual_str& error) {
     int num_inputs_blinded = 0;
 
     // Fill in input blinding details
-    for (const CInputCoin& coin : selected_coins) {
+    for (const COutput& coin : selected_coins) {
         det->i_amount_blinds.push_back(coin.bf_value);
         det->i_asset_blinds.push_back(coin.bf_asset);
         det->i_assets.push_back(coin.asset);
@@ -1350,8 +1349,6 @@ static bool CreateTransactionInternal(
     uint256 token_blinding;
 
     // Elements: Shuffle here to preserve random ordering for surjection proofs
-    // selected_coins = std::vector<CInputCoin>(setCoins.begin(), setCoins.end());
-    // Shuffle(selected_coins.begin(), selected_coins.end(), FastRandomContext());
     // Shuffle selected coins and fill in final vin
     std::vector<COutput> selected_coins = result->GetShuffledInputVector();
 

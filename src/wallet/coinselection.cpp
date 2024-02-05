@@ -16,20 +16,21 @@
 #include <optional>
 
 namespace wallet {
-CInputCoin::CInputCoin(const CWallet& wallet, const CWalletTx* wtx, unsigned int i) {
-    if (!wtx || !wtx->tx)
-        throw std::invalid_argument("tx should not be null");
-    if (i >= wtx->tx->vout.size())
-        throw std::out_of_range("The output index is out of range");
+// todo
+// CInputCoin::CInputCoin(const CWallet& wallet, const CWalletTx* wtx, unsigned int i) {
+//     if (!wtx || !wtx->tx)
+//         throw std::invalid_argument("tx should not be null");
+//     if (i >= wtx->tx->vout.size())
+//         throw std::out_of_range("The output index is out of range");
 
-    outpoint = COutPoint(wtx->tx->GetHash(), i);
-    txout = wtx->tx->vout[i];
-    effective_value = std::max<CAmount>(0, wtx->GetOutputValueOut(wallet, i));
-    value = wtx->GetOutputValueOut(wallet, i);
-    asset = wtx->GetOutputAsset(wallet, i);
-    bf_value = wtx->GetOutputAmountBlindingFactor(wallet, i);
-    bf_asset = wtx->GetOutputAssetBlindingFactor(wallet, i);
-}
+//     outpoint = COutPoint(wtx->tx->GetHash(), i);
+//     txout = wtx->tx->vout[i];
+//     effective_value = std::max<CAmount>(0, wtx->GetOutputValueOut(wallet, i));
+//     value = wtx->GetOutputValueOut(wallet, i);
+//     asset = wtx->GetOutputAsset(wallet, i);
+//     bf_value = wtx->GetOutputAmountBlindingFactor(wallet, i);
+//     bf_asset = wtx->GetOutputAssetBlindingFactor(wallet, i);
+// }
 
 // Descending order comparator
 struct {
@@ -256,7 +257,7 @@ std::optional<SelectionResult> KnapsackSolver(std::vector<OutputGroup>& groups, 
     SelectionResult result(mapTargetValue);
 
     std::vector<OutputGroup> inner_groups;
-    std::set<CInputCoin> setCoinsRet;
+    std::set<COutput> setCoinsRet;
     CAmount non_policy_effective_value = 0;
 
     // Perform the standard Knapsack solver for every non-policy asset individually.
@@ -275,7 +276,7 @@ std::optional<SelectionResult> KnapsackSolver(std::vector<OutputGroup>& groups, 
         // - no groups that are already used in the input set
         for (const OutputGroup& g : groups) {
             bool add = true;
-            for (const CInputCoin& c : g.m_outputs) {
+            for (const COutput& c : g.m_outputs) {
                 auto input_set = result.GetInputSet();
                 if (input_set.find(c) != input_set.end()) {
                     add = false;
@@ -300,7 +301,7 @@ std::optional<SelectionResult> KnapsackSolver(std::vector<OutputGroup>& groups, 
 
         if (auto inner_result = KnapsackSolver(inner_groups, it->second, rng, it->first)) {
             auto set = inner_result->GetInputSet();
-            for (const CInputCoin& ic : set) {
+            for (const COutput& ic : set) {
                 non_policy_effective_value += ic.effective_value;
             }
             result.AddInput(inner_result.value());
@@ -317,7 +318,7 @@ std::optional<SelectionResult> KnapsackSolver(std::vector<OutputGroup>& groups, 
         // - no groups that are already used in setCoinsRet
         for (const OutputGroup& g : groups) {
             bool add = true;
-            for (const CInputCoin& c : g.m_outputs) {
+            for (const COutput& c : g.m_outputs) {
                 auto set = result.GetInputSet();
                 if (set.find(c) != set.end()) {
                     add = false;
@@ -432,7 +433,7 @@ void OutputGroup::Insert(const COutput& output, size_t ancestors, size_t descend
     // Compute the effective value first
     const CAmount coin_fee = output.input_bytes < 0 ? 0 : m_effective_feerate.GetFee(output.input_bytes);
     // ELEMENTS: "effective value" only comes from the policy asset
-    const CAmount ev = output.txout.nValue * (output.txout.asset == ::policyAsset) - coin_fee;
+    const CAmount ev = output.value * (output.asset == ::policyAsset) - coin_fee;
 
     // Filter for positive only here before adding the coin
     if (positive_only && ev <= 0) return;
@@ -450,7 +451,7 @@ void OutputGroup::Insert(const COutput& output, size_t ancestors, size_t descend
     effective_value += coin.effective_value;
 
     m_from_me &= coin.from_me;
-    m_value += coin.txout.nValue;
+    m_value += coin.value;
     m_depth = std::min(m_depth, coin.depth);
     // ancestors here express the number of ancestors the new coin will end up having, which is
     // the sum, rather than the max; this will overestimate in the cases where multiple inputs
@@ -488,7 +489,7 @@ CAmount GetSelectionWaste(const std::set<COutput>& inputs, CAmount change_cost, 
     CAmount selected_effective_value = 0;
     for (const COutput& coin : inputs) {
         waste += coin.fee - coin.long_term_fee;
-        selected_effective_value += use_effective_value ? coin.effective_value : coin.txout.nValue;
+        selected_effective_value += use_effective_value ? coin.effective_value : coin.value;
     }
 
     if (change_cost) {
@@ -506,20 +507,20 @@ CAmount GetSelectionWaste(const std::set<COutput>& inputs, CAmount change_cost, 
 }
 
 // ELEMENTS:
-CAmount GetSelectionWaste(const std::set<CInputCoin>& inputs, CAmount change_cost, const CAmountMap& target_map, bool use_effective_value)
+CAmount GetSelectionWaste(const std::set<COutput>& inputs, CAmount change_cost, const CAmountMap& target_map, bool use_effective_value)
 {
     // This function should not be called with empty inputs as that would mean the selection failed
     assert(!inputs.empty());
 
     // create a map of asset -> coins from the inputs set
-    std::map<CAsset, std::set<CInputCoin>> coinset_map;
+    std::map<CAsset, std::set<COutput>> coinset_map;
     for(auto it = inputs.begin(); it != inputs.end(); ++it) {
         auto asset = it->asset;
         auto search = coinset_map.find(asset);
         if (search != coinset_map.end()) {
             search->second.insert(*it);
         } else {
-            std::set<CInputCoin> coinset;
+            std::set<COutput> coinset;
             coinset.insert(*it);
             coinset_map.insert({asset, coinset});
         }
@@ -536,8 +537,8 @@ CAmount GetSelectionWaste(const std::set<CInputCoin>& inputs, CAmount change_cos
         auto coinset = it->second;
         auto target = target_map.at(asset);
 
-        for (const CInputCoin& coin : coinset) {
-            waste += coin.m_fee - coin.m_long_term_fee;
+        for (const COutput& coin : coinset) {
+            waste += coin.fee - coin.long_term_fee;
             selected_effective_value += use_effective_value ? coin.effective_value : coin.value;
         }
 
@@ -610,7 +611,6 @@ bool SelectionResult::operator<(SelectionResult other) const
 
 std::string COutput::ToString() const
 {
-    return "";
-    // return strprintf("COutput(%s, %d, %d) [%s] [%s]", txout.GetHash().ToString(), i, nDepth, FormatMoney(tx->GetOutputValueOut(wallet, i)), tx->GetOutputAsset(wallet, i).GetHex());
+    return strprintf("COutput(%s, %d, %d) [%s] [%s]", outpoint.hash, outpoint.n, depth, FormatMoney(value), asset.GetHex());
 }
 } // namespace wallet
