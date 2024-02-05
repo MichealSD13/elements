@@ -718,10 +718,10 @@ RPCHelpMan listunspent()
 
     for (const COutput& out : vecOutputs) {
         CTxDestination address;
-        const CTxOut& tx_out = out.tx->tx->vout[out.i];
-        const CScript& scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
+        const CTxOut& tx_out = out.txout;
+        const CScript& scriptPubKey = out.txout.scriptPubKey;
         bool fValidAddress = ExtractDestination(scriptPubKey, address);
-        bool reused = avoid_reuse && pwallet->IsSpentKey(out.tx->GetHash(), out.i);
+        bool reused = avoid_reuse && pwallet->IsSpentKey(out.outpoint.hash, out.outpoint.n);
 
         if (destinations.size() && (!fValidAddress || !destinations.count(address)))
             continue;
@@ -740,8 +740,8 @@ RPCHelpMan listunspent()
         //////////
 
         UniValue entry(UniValue::VOBJ);
-        entry.pushKV("txid", out.tx->GetHash().GetHex());
-        entry.pushKV("vout", out.i);
+        entry.pushKV("txid", out.outpoint.hash.GetHex());
+        entry.pushKV("vout", (int)out.outpoint.n);
 
         if (fValidAddress) {
             entry.pushKV("address", EncodeDestination(address));
@@ -798,20 +798,20 @@ RPCHelpMan listunspent()
             entry.pushKV("amountblinder", out.tx->GetOutputAmountBlindingFactor(*pwallet, out.i).ToString());
             entry.pushKV("assetblinder", out.tx->GetOutputAssetBlindingFactor(*pwallet, out.i).ToString());
         }
-        entry.pushKV("confirmations", out.nDepth);
+        entry.pushKV("confirmations", out.depth);
         if (!out.nDepth) {
             size_t ancestor_count, descendant_count, ancestor_size;
             CAmount ancestor_fees;
-            pwallet->chain().getTransactionAncestry(out.tx->GetHash(), ancestor_count, descendant_count, &ancestor_size, &ancestor_fees);
+            pwallet->chain().getTransactionAncestry(out.outpoint.hash, ancestor_count, descendant_count, &ancestor_size, &ancestor_fees);
             if (ancestor_count) {
                 entry.pushKV("ancestorcount", uint64_t(ancestor_count));
                 entry.pushKV("ancestorsize", uint64_t(ancestor_size));
                 entry.pushKV("ancestorfees", uint64_t(ancestor_fees));
             }
         }
-        entry.pushKV("spendable", out.fSpendable);
-        entry.pushKV("solvable", out.fSolvable);
-        if (out.fSolvable) {
+        entry.pushKV("spendable", out.spendable);
+        entry.pushKV("solvable", out.solvable);
+        if (out.solvable) {
             std::unique_ptr<SigningProvider> provider = pwallet->GetSolvingProvider(scriptPubKey);
             if (provider) {
                 auto descriptor = InferDescriptor(scriptPubKey, *provider);
@@ -819,7 +819,7 @@ RPCHelpMan listunspent()
             }
         }
         if (avoid_reuse) entry.pushKV("reused", reused);
-        entry.pushKV("safe", out.fSafe);
+        entry.pushKV("safe", out.safe);
         results.push_back(entry);
     }
 
