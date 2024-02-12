@@ -611,6 +611,6 @@ bool SelectionResult::operator<(SelectionResult other) const
 
 std::string COutput::ToString() const
 {
-    return strprintf("COutput(%s, %d, %d) [%s] [%s]", outpoint.hash, outpoint.n, depth, FormatMoney(value), asset.GetHex());
+    return strprintf("COutput(%s, %d, %d) [%s] [%s]", outpoint.hash.ToString(), outpoint.n, depth, FormatMoney(value), asset.GetHex());
 }
 } // namespace wallet

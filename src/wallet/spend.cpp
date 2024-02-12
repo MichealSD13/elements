@@ -594,7 +594,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
             }
             input_bytes = GetTxSpendSize(wallet, wtx, outpoint.n, false);
             txout = wtx.tx->vout.at(outpoint.n);
-            coin = COutput(outpoint, txout, outpoint.n, input_bytes, true, true, true, 0, false);
+            coin = COutput(wallet, wtx, outpoint, txout, outpoint.n, input_bytes, true, true, true, 0, false);
         } else {
             // The input is external. We did not find the tx in mapWallet.
             if (!coin_control.GetExternalOutput(outpoint, txout)) {
@@ -618,7 +618,7 @@ std::optional<SelectionResult> SelectCoins(const CWallet& wallet, const std::vec
         // If available, override calculated size with coin control specified size
         if (coin_control.HasInputWeight(outpoint)) {
             input_bytes = GetVirtualTransactionSize(coin_control.GetInputWeight(outpoint), 0, 0);
-            coin = COutput(outpoint, txout, outpoint.n, input_bytes, true, true, true, 0, false);
+            coin.input_bytes = input_bytes; // ELEMENTS:
         }
 
         if (input_bytes == -1) {

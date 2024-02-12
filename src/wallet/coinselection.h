@@ -80,6 +80,7 @@ public:
     /** The fee required to spend this output at the consolidation feerate. */
     CAmount long_term_fee{0};
 
+    /** ELEMENTS: this constructor can only be used for explicit outputs. */
     COutput(const COutPoint& outpoint, const CTxOut& txout, int depth, int input_bytes, bool spendable, bool solvable, bool safe, int64_t time, bool from_me)
         : outpoint(outpoint),
         txout(txout),
@@ -89,15 +90,30 @@ public:
         solvable(solvable),
         safe(safe),
         time(time),
-        from_me(from_me)
+        from_me(from_me),
+        effective_value(txout.nValue.GetAmount()),
+        value(txout.nValue.GetAmount()),
+        asset(txout.nAsset.GetAsset())
     {
-        if (txout.nValue.IsExplicit()) {
-            effective_value = txout.nValue.GetAmount();
-            value = txout.nValue.GetAmount();
-            asset = txout.nAsset.GetAsset();
-        } else {
-            effective_value = 0;
-        }
+    }
+
+    /** ELEMENTS: use this constructor when wallet and wtx are available. */
+    COutput(const CWallet& wallet, const CWalletTx& wtx, const COutPoint& outpoint, const CTxOut& txout, int depth, int input_bytes, bool spendable, bool solvable, bool safe, int64_t time, bool from_me)
+        : outpoint(outpoint),
+        txout(txout),
+        depth(depth),
+        input_bytes(input_bytes),
+        spendable(spendable),
+        solvable(solvable),
+        safe(safe),
+        time(time),
+        from_me(from_me),
+        effective_value(wtx.GetOutputValueOut(wallet, outpoint.n)),
+        value(wtx.GetOutputValueOut(wallet, outpoint.n)),
+        asset(wtx.GetOutputAsset(wallet, outpoint.n)),
+        bf_value(wtx.GetOutputAmountBlindingFactor(wallet, outpoint.n)),
+        bf_asset(wtx.GetOutputAssetBlindingFactor(wallet, outpoint.n))
+    {
     }
 
     std::string ToString() const;
