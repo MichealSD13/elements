@@ -380,7 +380,7 @@ std::map<CTxDestination, std::vector<COutput>> ListCoins(const CWallet& wallet) 
                 CTxDestination address;
                 if (ExtractDestination(FindNonChangeParentOutput(wallet, *wtx.tx, output.n).scriptPubKey, address)) {
                     result[address].emplace_back(
-                        COutPoint(wtx.GetHash(), output.n), wtx.tx->vout.at(output.n), depth, GetTxSpendSize(wallet, wtx, output.n), /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ false, wtx.GetTxTime(), CachedTxIsFromMe(wallet, wtx, ISMINE_ALL));
+                        wallet, wtx, COutPoint(wtx.GetHash(), output.n), wtx.tx->vout.at(output.n), depth, GetTxSpendSize(wallet, wtx, output.n), /*spendable=*/ true, /*solvable=*/ true, /*safe=*/ false, wtx.GetTxTime(), CachedTxIsFromMe(wallet, wtx, ISMINE_ALL));
                 }
             }
         }
