@@ -12,6 +12,8 @@
 #include <primitives/transaction.h>
 #include <primitives/bitcoin/transaction.h>
 #include <random.h>
+#include <wallet/transaction.h>
+#include <wallet/wallet.h>
 
 #include <optional>
 
@@ -24,8 +26,8 @@ static constexpr CAmount MIN_CHANGE{COIN / 100};
 //! final minimum change amount after paying for fees
 static const CAmount MIN_FINAL_CHANGE = MIN_CHANGE/2;
 
-class CWallet;
-class CWalletTx;
+// class CWallet;
+// class CWalletTx;
 
 /** A UTXO under consideration for use in funding a new transaction. */
 class COutput
@@ -36,11 +38,6 @@ public:
 
     /** The output itself */
     CTxOut txout;
-    // ELEMENTS:
-    CAmount value;
-    CAsset asset;
-    uint256 bf_value;
-    uint256 bf_asset;
 
     /**
      * Depth in block chain.
@@ -80,7 +77,13 @@ public:
     /** The fee required to spend this output at the consolidation feerate. */
     CAmount long_term_fee{0};
 
-    /** ELEMENTS: this constructor can only be used for explicit outputs. */
+    // ELEMENTS:
+    CAmount value;
+    CAsset asset;
+    uint256 bf_value;
+    uint256 bf_asset;
+
+    /** ELEMENTS: this constructor can only be used for explicit outputs or dummy initialization. */
     COutput(const COutPoint& outpoint, const CTxOut& txout, int depth, int input_bytes, bool spendable, bool solvable, bool safe, int64_t time, bool from_me)
         : outpoint(outpoint),
         txout(txout),
@@ -90,11 +93,21 @@ public:
         solvable(solvable),
         safe(safe),
         time(time),
-        from_me(from_me),
-        effective_value(txout.nValue.GetAmount()),
-        value(txout.nValue.GetAmount()),
-        asset(txout.nAsset.GetAsset())
+        from_me(from_me)
     {
+        if (txout.nValue.IsExplicit()) {
+            value = txout.nValue.GetAmount();
+            effective_value = txout.nValue.GetAmount();
+        } else {
+            value = 0;
+            effective_value = 0;
+        }
+
+        if (txout.nAsset.IsExplicit()) {
+            asset = txout.nAsset.GetAsset();
+        } else {
+            asset = CAsset();
+        }
     }
 
     /** ELEMENTS: use this constructor when wallet and wtx are available. */
