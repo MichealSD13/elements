@@ -238,8 +238,10 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         # Main test loop:
         # each time through the loop, generate a bunch of transactions,
         # and then either mine a single new block on the tip, or some-sized reorg.
-        # ELEMENTS: reduced iters to run in some "reasonable" amount of time (~6 hours)
-        for i in range(6):
+        # ELEMENTS: modified to only run until successfully testing a node crash on restart
+        # with a maximum of 10 iterations
+        i = 0
+        while self.crashed_on_restart < 1:
             self.log.info(f"Iteration {i}, generating 2500 transactions {self.restart_counts}")
             # Generate a bunch of small-ish transactions
             self.generate_small_transactions(self.nodes[3], 2500, utxo_list)
@@ -269,6 +271,11 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
             self.sync_node3blocks(block_hashes)
             utxo_list = self.nodes[3].listunspent()
             self.log.debug(f"Node3 utxo count: {len(utxo_list)}")
+
+            if i >= 9:
+                raise AssertionError(f"10 iterations without node crash, this should not happen")
+            else:
+                i += 1
 
         # Check that the utxo hashes agree with node3
         # Useful side effect: each utxo cache gets flushed here, so that we
