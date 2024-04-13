@@ -242,9 +242,9 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
         # with a maximum of 10 iterations
         i = 0
         while self.crashed_on_restart < 1:
-            self.log.info(f"Iteration {i}, generating 2500 transactions {self.restart_counts}")
+            self.log.info(f"Iteration {i}, generating 3000 transactions {self.restart_counts}")
             # Generate a bunch of small-ish transactions
-            self.generate_small_transactions(self.nodes[3], 2500, utxo_list)
+            self.generate_small_transactions(self.nodes[3], 3000, utxo_list)
             # Pick a random block between current tip, and starting tip
             current_height = self.nodes[3].getblockcount()
             random_height = random.randint(starting_tip_height, current_height)
@@ -272,8 +272,8 @@ class ChainstateWriteCrashTest(BitcoinTestFramework):
             utxo_list = self.nodes[3].listunspent()
             self.log.debug(f"Node3 utxo count: {len(utxo_list)}")
 
-            if i >= 9:
-                raise AssertionError(f"10 iterations without node crash, this should not happen")
+            if i >= 11:
+                raise AssertionError(f"12 iterations without node crash, this should not happen")
             else:
                 i += 1
 
