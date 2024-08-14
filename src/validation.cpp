@@ -790,6 +790,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     std::vector<std::pair<CScript, CScript>> fedpegscripts = GetValidFedpegScripts(m_active_chainstate.m_chain.Tip(), chainparams.GetConsensus(), true /* nextblock_validation */);
 
     const CCoinsViewCache& coins_cache = m_active_chainstate.CoinsTip();
+    std::vector<unsigned int> pegin_indices;
     // do all inputs exist?
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
         const CTxIn& txin = tx.vin[i];
@@ -811,6 +812,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
             if (m_view.IsPeginSpent(pegin)) {
                 return state.Invalid(TxValidationResult::TX_CONSENSUS, "pegin-already-claimed");
             }
+            pegin_indices.push_back(i);
             continue;
         }
 
@@ -917,6 +919,122 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // ELEMENTS: accept discounted fees for Confidential Transactions only, if enabled.
     int64_t package_size = Params().GetAcceptDiscountCT() ? GetDiscountVirtualTransactionSize(tx) : ws.m_vsize;
     if (!bypass_limits && !CheckFeeRate(package_size, ws.m_modified_fees, state)) return false;
+    // ELEMENTS: check if peg-in subsidy is required. Can't check without validatepegin.
+    if (gArgs.GetBoolArg("-validatepegin", Params().GetConsensus().has_parent_chain) && pegin_indices.size() > 0) {
+        CAmount subsidy = 0;
+        CAmount value = 0;
+        for (size_t i = 0; i < tx.vout.size(); i++) {
+            const CTxOut& txout = tx.vout[i];
+            if (txout.IsFee()) {
+                continue;
+            } else if (txout.scriptPubKey.IsUnspendable()) {
+                subsidy += txout.nValue.GetAmount();
+            } else if (txout.nValue.IsExplicit()) {
+                value += txout.nValue.GetAmount();
+            }
+        }
+        CAmount threshold = Params().GetPeginSubsidyThreshold();
+        CAmount fee = 0;
+        int64_t vsize = 0;
+        if (m_active_chainstate.m_chain.Height() >= Params().GetPeginSubsidyHeight() && value < threshold) {
+            for (size_t i = 0; i < pegin_indices.size(); ++i) {
+                CAmount pvalue;
+                CAsset passet;
+                uint256 pgenesis;
+                CScript pscript;
+                std::variant<std::monostate, Sidechain::Bitcoin::CTransactionRef, CTransactionRef> ptx;
+                std::variant<std::monostate, Sidechain::Bitcoin::CMerkleBlock, CMerkleBlock> pmerkle;
+
+                if (!DecomposePeginWitness(tx.witness.vtxinwit[pegin_indices[i]].m_pegin_witness, pvalue, passet, pgenesis, pscript, ptx, pmerkle)) {
+                    return state.Invalid(TxValidationResult::TX_WITNESS_MUTATED, "pegin-invalid-parent-tx", "couldn't get hash from pegin witness tx");
+                }
+                uint256 txid;
+                switch (ptx.index()) {
+                case 0:
+                    assert(false);
+                case 1:
+                    txid = std::get<Sidechain::Bitcoin::CTransactionRef>(ptx)->GetHash();
+                    break;
+                case 2:
+                    txid = std::get<CTransactionRef>(ptx)->GetHash();
+                    break;
+                }
+                uint256 blockhash;
+                switch (pmerkle.index()) {
+                case 0:
+                    assert(false);
+                case 1:
+                    blockhash = std::get<Sidechain::Bitcoin::CMerkleBlock>(pmerkle).header.GetHash();
+                    break;
+                case 2:
+                    blockhash = std::get<CMerkleBlock>(pmerkle).header.GetHash();
+                    break;
+                }
+
+                assert(passet == Params().GetConsensus().pegged_asset);
+                UniValue params(UniValue::VARR);
+                params.push_back(UniValue(txid.GetHex()));
+                params.push_back(UniValue(2));
+                params.push_back(UniValue(blockhash.GetHex()));
+                UniValue result = CallMainChainRPC("getrawtransaction", params);
+                if (!result["error"].isNull()) {
+                    return state.Invalid(TxValidationResult::TX_WITNESS_MUTATED, "pegin-subsidy-mainchain-error", result["error"]["message"].get_str());
+                } else {
+                    vsize += result["result"]["vsize"].get_int64();
+                    bool fallback = false;
+                    if (result["result"]["fee"].isNum()) {
+                        fee += result["result"]["fee"].get_real() * COIN;
+                    } else if (result["result"]["fee"].isObject()) {
+                        std::string asset = chainparams.GetConsensus().parent_pegged_asset.GetHex();
+                        if (result["result"]["fee"][asset].isNum()) {
+                            fee += result["result"]["fee"][asset].get_real() * COIN;
+                        } else {
+                            // fee object exists but doesn't have a number value for the pegged asset
+                            // so fallback to manual fee calculation
+                            fallback = true;
+                        }
+                    } else {
+                        // no fee number value or object
+                        // use manual calculation
+                        fallback = true;
+                    }
+
+                    if (fallback) {
+                        LogPrintf("WARNING: Using manual calculation for parent peg-in transaction fee, which requires txindex and an RPC call for each transaction input. Upgrade parent node to Bitcoin Core v25 or newer.\n");
+                        CAmount output_sum = 0;
+                        for (const auto& output : result["result"]["vout"].getValues()) {
+                            if (output["scriptPubKey"]["type"].get_str() != "fee") {
+                                output_sum += output["value"].get_real() * COIN;
+                            }
+                        }
+                        CAmount input_sum = 0;
+                        for (const auto& input : result["result"]["vin"].getValues()) {
+                            UniValue params(UniValue::VARR);
+                            params.push_back(UniValue(input["txid"]));
+                            params.push_back(UniValue(1));
+                            result = CallMainChainRPC("getrawtransaction", params);
+                            if (!result["error"].isNull()) {
+                                return state.Invalid(TxValidationResult::TX_WITNESS_MUTATED, "pegin-subsidy-mainchain-error", result["error"]["message"].get_str());
+                            } else {
+                                input_sum += result["result"]["vout"][input["vout"].get_int()]["value"].get_real() * COIN;
+                            }
+                        }
+                        fee += input_sum - output_sum;
+                    }
+                }
+
+                assert(fee >= 0);
+                auto feerate = CFeeRate(fee, vsize);
+                CAmount expected = feerate.GetFee(ws.m_vsize);
+
+                if (value + expected < threshold && subsidy < expected) {
+                    return state.Invalid(TxValidationResult::TX_NOT_STANDARD, "pegin-subsidy-too-low",
+                                         strprintf("peg-in value: %d, subsidy threshold: %d, subsidy value: %d, expected subsidy: %d, parent feerate: %s",
+                                                   FormatMoney(value), FormatMoney(threshold), FormatMoney(subsidy), FormatMoney(expected), feerate.ToString()));
+                }
+            }
+        }
+    }
 
     ws.m_iters_conflicting = m_pool.GetIterSet(ws.m_conflicts);
     // Calculate in-mempool ancestors, up to a limit.
